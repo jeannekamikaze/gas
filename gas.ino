@@ -6,10 +6,21 @@
 #include <LiquidCrystal.h>
 #include <EEPROM.h>
 
+// Pin analogico de entrada donde va conectado el gas.
 #define GAS_INPUT A0
+
+// Pin digital de entrada donde va conectado el boton de calibracion.
 #define CALIBRATE_BUTTON 2
+
+// Duracion de la calibracion en segundos.
 #define CALIBRATION_DURATION 10 // seconds
-#define SMOOTHING_FACTOR 0.9
+
+// Valor entre 0 y 1 que suaviza la senyal de gas de entrada.
+// 0 -> suavizado maximo.
+// 1 -> sin suavizado.
+// 0 < x < 1 -> suavizado intermedio.
+#define SMOOTHING_FACTOR 0.3
+
 #define STATE_HEADER 0xcafebabe
 
 void read_state (CalibratedInput& calibrated_input)
@@ -47,16 +58,10 @@ void render_calibration (unsigned long t, LiquidCrystal& lcd, const Calibration&
   print2(lcd, calibration.time_remaining(t));
 }
 
-void process_input (int input, CalibratedInput& calibrated_input, Smoothed& smoothed_input, LiquidCrystal& lcd)
-{  
-  // Map the input to a calibrated range of values.
-  input = calibrated_input(input);
-  
-  // Smoothing the input to avoid flickering in the lcd.
-  int smooth_input = int(smoothed_input(input));
-  
+void render_input (int input, LiquidCrystal& lcd)
+{
   lcd.setCursor(6,0);
-  print3(lcd, smooth_input);
+  print3(lcd, input);
 }
 
 LiquidCrystal lcd(7, 6, 8, 9, 10, 11);
@@ -81,16 +86,19 @@ void loop ()
 {
   unsigned long t = millis();
   int calibrate_button = digitalRead(CALIBRATE_BUTTON);
-  int input = read_3v3(GAS_INPUT);
-  
+
+  // Smoothing the signal to prevent flickering.
+  int raw_gas = int(smoothed_input(read_3v3(GAS_INPUT)));
+
+  // Calibration.
   if (calibrate_button == HIGH && calibration.state() == Calibration::Idle)
   {
-    calibration.start(t, CALIBRATION_DURATION, input);
+    calibration.start(t, CALIBRATION_DURATION, raw_gas);
   }
   
   if (calibration.state() == Calibration::Running)
   {
-    calibration.update(t, input, calibrated_input);
+    calibration.update(t, raw_gas, calibrated_input);
     render_calibration(t, lcd, calibration);
 
     if (calibration.state() == Calibration::Idle) // calibration is done
@@ -99,6 +107,8 @@ void loop ()
       write_state(calibrated_input);
     }
   }
-  
-  process_input(input, calibrated_input, smoothed_input, lcd);
+
+  // Output.
+  int calibrated_gas = calibrated_input(raw_gas);
+  render_input(calibrated_gas, lcd);
 }
